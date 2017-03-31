@@ -522,7 +522,7 @@ class PGCli(object):
             reserve_space_for_menu=self.min_num_menu_lines,
             get_prompt_tokens=prompt_tokens,
             get_continuation_tokens=get_continuation_tokens,
-            get_bottom_toolbar_tokens=get_toolbar_tokens,
+            # get_bottom_toolbar_tokens=get_toolbar_tokens,
             display_completions_in_columns=self.wider_completion_menu,
             multiline=True,
             extra_input_processors=[
