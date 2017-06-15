@@ -45,7 +45,7 @@ from .pgexecute import PGExecute
 from .pgbuffer import PGBuffer
 from .completion_refresher import CompletionRefresher
 from .config import (get_casing_file,
-    load_config, config_location, ensure_dir_exists, get_config)
+    config_location, ensure_dir_exists, get_config)
 from .key_bindings import pgcli_bindings
 from .encodingutils import utf8tounicode
 from .__init__ import __version__
@@ -811,6 +811,7 @@ def cli(database, username_opt, host, port, prompt_passwd, never_prompt,
     if os.path.exists(os.path.expanduser('~/.pgclirc')):
         if not os.path.exists(config_full_path):
             shutil.move(os.path.expanduser('~/.pgclirc'), config_full_path)
+            pgclirc = config_full_path
             print ('Config file (~/.pgclirc) moved to new location',
                    config_full_path)
         else:
@@ -818,7 +819,7 @@ def cli(database, username_opt, host, port, prompt_passwd, never_prompt,
             print ('Please move the existing config file ~/.pgclirc to',
                    config_full_path)
 
-    cfg = load_config(pgclirc, config_full_path)
+    cfg = get_config(pgclirc)
     pgcli = PGCli(prompt_passwd, never_prompt, config=cfg,
                   row_limit=row_limit, single_connection=single_connection,
                   less_chatty=less_chatty, prompt=prompt)

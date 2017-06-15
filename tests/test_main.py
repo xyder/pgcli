@@ -82,9 +82,11 @@ def test_i_works(tmpdir, executor):
 
 
 def test_missing_rc_dir(tmpdir):
+    from pgcli.config import get_config
     rcfile = str(tmpdir.join("subdir").join("rcfile"))
 
-    PGCli(pgclirc_file=rcfile)
+    assert not os.path.exists(rcfile)
+    get_config(rcfile)
     assert os.path.exists(rcfile)
 
 
