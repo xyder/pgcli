@@ -118,15 +118,14 @@ class PGCli(object):
             os.environ['LESS'] = '-SRXF'
 
     def __init__(self, force_passwd_prompt=False, never_passwd_prompt=False,
-                 pgexecute=None, pgclirc_file=None, row_limit=None,
+                 pgexecute=None, config=None, row_limit=None,
                  single_connection=False, less_chatty=None, prompt=None):
 
         self.force_passwd_prompt = force_passwd_prompt
         self.never_passwd_prompt = never_passwd_prompt
         self.pgexecute = pgexecute
 
-        # Load config.
-        c = self.config = get_config(pgclirc_file)
+        self.config = c = config
 
         self.logger = logging.getLogger(__name__)
         self.initialize_logging()
@@ -819,7 +818,8 @@ def cli(database, username_opt, host, port, prompt_passwd, never_prompt,
             print ('Please move the existing config file ~/.pgclirc to',
                    config_full_path)
 
-    pgcli = PGCli(prompt_passwd, never_prompt, pgclirc_file=pgclirc,
+    cfg = load_config(pgclirc, config_full_path)
+    pgcli = PGCli(prompt_passwd, never_prompt, config=cfg,
                   row_limit=row_limit, single_connection=single_connection,
                   less_chatty=less_chatty, prompt=prompt)
 
@@ -829,7 +829,6 @@ def cli(database, username_opt, host, port, prompt_passwd, never_prompt,
 
     if dsn is not '':
         try:
-            cfg = load_config(pgclirc, config_full_path)
             dsn_config = cfg['alias_dsn'][dsn]
         except:
             click.secho('Invalid DSNs found in the config file. '\
