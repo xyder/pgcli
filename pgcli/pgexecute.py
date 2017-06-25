@@ -65,11 +65,15 @@ def register_date_typecasters(connection):
     """
     def cast_date(value, cursor):
         return value
+    wait(connection)
     cursor = connection.cursor()
     cursor.execute('SELECT NULL::date')
+    wait(connection)
     date_oid = cursor.description[0][1]
+    wait(connection)
     cursor.execute('SELECT NULL::timestamp')
     timestamp_oid = cursor.description[0][1]
+    wait(connection)
     cursor.execute('SELECT NULL::timestamp with time zone')
     timestamptz_oid = cursor.description[0][1]
     oids = (date_oid, timestamp_oid, timestamptz_oid)
@@ -113,12 +117,26 @@ def register_hstore_typecaster(conn):
     """
     with conn.cursor() as cur:
         try:
+            wait(conn)
             cur.execute("SELECT 'hstore'::regtype::oid")
+            wait(conn)
             oid = cur.fetchone()[0]
             ext.register_type(ext.new_type((oid,), "HSTORE", ext.UNICODE))
         except Exception:
             pass
 
+
+def wait(conn):
+    while 1:
+        state = conn.poll()
+        if state == psycopg2.extensions.POLL_OK:
+            break
+        elif state == psycopg2.extensions.POLL_WRITE:
+            select.select([], [conn.fileno()], [])
+        elif state == psycopg2.extensions.POLL_READ:
+            select.select([conn.fileno()], [], [])
+        else:
+            raise psycopg2.OperationalError("poll() returned %s" % state)
 
 class PGExecute(object):
 
@@ -179,15 +197,15 @@ class PGExecute(object):
                 password=unicode2utf8(password),
                 host=unicode2utf8(host),
                 port=unicode2utf8(port),
+                async=True,
                 **kwargs)
-
+            wait(conn)
             cursor = conn.cursor()
 
-        conn.set_client_encoding('utf8')
+
         if hasattr(self, 'conn'):
             self.conn.close()
         self.conn = conn
-        self.conn.autocommit = True
 
         if dsn:
             # When we connect using a DSN, we don't really know what db,
@@ -204,8 +222,9 @@ class PGExecute(object):
         self.port = port
 
         cursor.execute("SHOW ALL")
-        db_parameters = dict(name_val_desc[:2] for name_val_desc in cursor.fetchall())
 
+        wait(self.conn)
+        db_parameters = dict(name_val_desc[:2] for name_val_desc in cursor.fetchall())
         pid = self._select_one(cursor, 'select pg_backend_pid()')[0]
         self.pid = pid
         self.superuser = db_parameters.get('is_superuser') == '1'
@@ -221,7 +240,9 @@ class PGExecute(object):
         :param sql: string
         :return: string
         """
+        wait(self.conn)
         cur.execute(sql)
+        wait(self.conn)
         return cur.fetchone()
 
     def _json_typecaster(self, json_data):
@@ -331,7 +352,7 @@ class PGExecute(object):
         _logger.debug('Regular sql statement. sql: %r', split_sql)
         cur = self.conn.cursor()
         cur.execute(split_sql)
-
+        wait(self.conn)
         # conn.notices persist between queies, we use pop to clear out the list
         title = ''
         while len(self.conn.notices) > 0:
@@ -352,14 +373,19 @@ class PGExecute(object):
         try:
             with self.conn.cursor() as cur:
                 _logger.debug('Search path query. sql: %r', self.search_path_query)
+                wait(self.conn)
                 cur.execute(self.search_path_query)
+                wait(self.conn)
                 return [x[0] for x in cur.fetchall()]
         except psycopg2.ProgrammingError:
             fallback = 'SELECT * FROM current_schemas(true)'
             with self.conn.cursor() as cur:
                 _logger.debug('Search path query. sql: %r', fallback)
                 cur.execute(fallback)
-                return cur.fetchone()[0]
+                wait(self.conn)
+                path = cur.fetchone()[0]
+                wait(self.conn)
+                return path
 
 
     def schemata(self):
@@ -368,6 +394,7 @@ class PGExecute(object):
         with self.conn.cursor() as cur:
             _logger.debug('Schemata Query. sql: %r', self.schemata_query)
             cur.execute(self.schemata_query)
+            wait(self.conn)
             return [x[0] for x in cur.fetchall()]
 
     def _relations(self, kinds=('r', 'v', 'm')):
@@ -384,6 +411,7 @@ class PGExecute(object):
             sql = cur.mogrify(self.tables_query, [kinds])
             _logger.debug('Tables Query. sql: %r', sql)
             cur.execute(sql)
+            wait(self.conn)
             for row in cur:
                 yield row
 
@@ -447,6 +475,7 @@ class PGExecute(object):
             sql = cur.mogrify(columns_query, [kinds])
             _logger.debug('Columns Query. sql: %r', sql)
             cur.execute(sql)
+            wait(self.conn)
             for row in cur:
                 yield row
 
@@ -462,6 +491,7 @@ class PGExecute(object):
         with self.conn.cursor() as cur:
             _logger.debug('Databases Query. sql: %r', self.databases_query)
             cur.execute(self.databases_query)
+            wait(self.conn)
             return [x[0] for x in cur.fetchall()]
 
     def foreignkeys(self):
@@ -501,6 +531,7 @@ class PGExecute(object):
                 '''
             _logger.debug('Functions Query. sql: %r', query)
             cur.execute(query)
+            wait(self.conn)
             for row in cur:
                 yield ForeignKey(*row)
 
@@ -562,6 +593,7 @@ class PGExecute(object):
         with self.conn.cursor() as cur:
             _logger.debug('Functions Query. sql: %r', query)
             cur.execute(query)
+            wait(self.conn)
             for row in cur:
                   yield FunctionMetadata(*row)
 
@@ -607,6 +639,7 @@ class PGExecute(object):
                 '''
             _logger.debug('Datatypes Query. sql: %r', query)
             cur.execute(query)
+            wait(self.conn)
             for row in cur:
                 yield row
 
@@ -654,5 +687,7 @@ class PGExecute(object):
             '''
             _logger.debug('Casing Query. sql: %r', query)
             cur.execute(query)
+            wait(self.conn)
             for row in cur:
                 yield row[0]
+        conn.commit()
