@@ -30,6 +30,21 @@ ext.register_type(ext.new_type((17,), 'BYTEA_TEXT', psycopg2.STRING))
 _WAIT_SELECT_TIMEOUT = 1
 
 
+def _select_one(sql, conn):
+    """
+    Helper method to run a select and retrieve a single field value
+    :param sql: string
+    :param conn: connection
+    :return: string
+    """
+    wait(conn)
+    cur = conn.cursor()
+    wait(conn)
+    cur.execute(sql)
+    wait(conn)
+    return cur.fetchone()
+
+
 def _wait_select(conn):
     """
         copy-pasted from psycopg2.extras.wait_select
@@ -58,15 +73,15 @@ def _wait_select(conn):
 ext.set_wait_callback(_wait_select)
 
 
-def register_date_typecasters(connection):
+def register_date_typecasters(cursor):
     """
     Casts date and timestamp values to string, resolves issues with out of
     range dates (e.g. BC) which psycopg2 can't handle
     """
-    def cast_date(value, cursor):
+    def cast_date(value, cur):
         return value
+    connection = cursor.connection
     wait(connection)
-    cursor = connection.cursor()
     cursor.execute('SELECT NULL::date')
     wait(connection)
     date_oid = cursor.description[0][1]
@@ -97,13 +112,14 @@ def register_json_typecasters(conn, loads_fn):
     (if any) were successfully registered.
     """
     available = set()
-
     for name in ['json', 'jsonb']:
-        try:
-            psycopg2.extras.register_json(conn, loads=loads_fn, name=name)
+        sql = "select oid from pg_type where pg_type.typname = '" + name + "'"
+        array_sql = "select oid from pg_type where pg_type.typname = '_" + name + "'"
+        oid = _select_one(sql=sql, conn=conn)[0]
+        array_oid = _select_one(sql=array_sql, conn=conn)[0]
+        if oid:
+            psycopg2.extras.register_json(conn, loads=loads_fn,  oid=oid, array_oid=array_oid)
             available.add(name)
-        except psycopg2.ProgrammingError:
-            pass
 
     return available
 
@@ -211,9 +227,11 @@ class PGExecute(object):
             # When we connect using a DSN, we don't really know what db,
             # user, etc. we connected to. Let's read it.
             # Note: moved this after setting autocommit because of #664.
-            db, user, host, port = self._select_one(
-                cursor,
-                'select current_database(), current_user, inet_server_addr(), inet_server_port()')
+            db, user, host, port = _select_one(
+                sql='select current_database(), current_user, inet_server_addr(), inet_server_port()',
+                conn=conn,
+                cur=cursor
+            )
 
         self.dbname = db
         self.user = user
@@ -225,25 +243,13 @@ class PGExecute(object):
 
         wait(self.conn)
         db_parameters = dict(name_val_desc[:2] for name_val_desc in cursor.fetchall())
-        pid = self._select_one(cursor, 'select pg_backend_pid()')[0]
+        pid = _select_one(sql='select pg_backend_pid()', conn=conn)[0]
         self.pid = pid
         self.superuser = db_parameters.get('is_superuser') == '1'
 
-        register_date_typecasters(conn)
+        register_date_typecasters(cursor)
         register_json_typecasters(self.conn, self._json_typecaster)
         register_hstore_typecaster(self.conn)
-
-    def _select_one(self, cur, sql):
-        """
-        Helper method to run a select and retrieve a single field value
-        :param cur: cursor
-        :param sql: string
-        :return: string
-        """
-        wait(self.conn)
-        cur.execute(sql)
-        wait(self.conn)
-        return cur.fetchone()
 
     def _json_typecaster(self, json_data):
         """Interpret incoming JSON data as a string.
