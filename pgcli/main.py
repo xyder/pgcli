@@ -897,12 +897,14 @@ class PGCli(object):
               'available databases, then exit.')
 @click.option('--auto-vertical-output', is_flag=True,
               help='Automatically switch to vertical output mode if the result is wider than the terminal width.')
+@click.option('-t', '--table', is_flag=True,
+              help='Display batch output in table format.')
 @click.argument('database', default=lambda: None, envvar='PGDATABASE', nargs=1)
 @click.argument('username', default=lambda: None, envvar='PGUSER', nargs=1)
 def cli(database, username_opt, host, port, prompt_passwd, never_prompt,
         single_connection, dbname, username, version, pgclirc, dsn, row_limit,
         less_chatty, prompt, prompt_dsn, list_databases, auto_vertical_output,
-        list_dsn):
+        list_dsn, table):
 
     if version:
         print('Version:', __version__)
@@ -990,6 +992,18 @@ def cli(database, username_opt, host, port, prompt_passwd, never_prompt,
     if setproctitle:
         obfuscate_process_password()
 
+    stdin = click.get_text_stream('stdin')
+    if not stdin.isatty():
+        results = pgcli.pgexecute.run(stdin.read())
+        for result in results:
+            title, cur, headers, status, sql, success = result
+            table_format = pgcli.table_format if table else None
+            settings = OutputSettings(table_format=table_format)
+            output = format_output(title, cur, headers, None, settings)
+            for line in output:
+                click.echo(line)
+        exit(0)
+
     pgcli.run_cli()
 
 
@@ -1056,6 +1070,13 @@ def exception_formatter(e):
 
 def format_output(title, cur, headers, status, settings):
     output = []
+
+    if not settings.table_format:
+        output.append('\t'.join(headers))
+        for row in cur:
+            output.append('\t'.join([str(r) for r in row]))
+        return output
+
     expanded = (settings.expanded or settings.table_format == 'vertical')
     table_format = ('vertical' if settings.expanded else
                     settings.table_format)
