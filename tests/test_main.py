@@ -4,6 +4,7 @@ import os
 import platform
 import mock
 from decimal import Decimal
+from click.testing import CliRunner
 
 import pytest
 try:
@@ -12,9 +13,15 @@ except ImportError:
     setproctitle = None
 
 from pgcli.main import (
-    obfuscate_process_password, format_output, PGCli, OutputSettings
+    obfuscate_process_password, format_output, PGCli, OutputSettings, cli
 )
-from utils import dbtest, run
+from utils import (
+    POSTGRES_HOST, POSTGRES_USER, POSTGRES_PORT, POSTGRES_PASSWORD, dbtest, run
+)
+
+
+CLI_ARGS = ['--username', POSTGRES_USER, '--host', POSTGRES_HOST,
+            '--password', POSTGRES_PASSWORD, '--dbname', '_test_db']
 
 
 @pytest.mark.skipif(platform.system() == 'Windows',
@@ -145,6 +152,53 @@ def test_format_output_auto_expand():
         'test status'
     ]
     assert '\n'.join(expanded_results) == '\n'.join(expanded)
+
+
+@dbtest
+def test_format_output_no_table():
+    settings = OutputSettings(table_format=None, dcmlfmt='d', floatfmt='g')
+    results = format_output('Title', [('abc', 'def')], ['head1', 'head2'],
+                            'test status', settings)
+    # TODO check why I don't have `Title` nor `test status`
+    expected = ['head1\thead2', 'abc\tdef']
+    assert list(results) == expected
+
+
+@dbtest
+def test_batch_mode(executor):
+    run(executor, '''create table test(a text)''')
+    run(executor, '''insert into test values('abc'), ('def'), ('ghi')''')
+
+    sql = (
+        'select count(*) from test;\n'
+        'select * from test limit 1;'
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, args=CLI_ARGS, input=sql)
+
+    assert result.exit_code == 0
+    assert 'count\n3\na\nabc' in result.output
+
+@dbtest
+def test_batch_mode_table(executor):
+    run(executor, '''create table test(a text)''')
+    run(executor, '''insert into test values('abc'), ('def'), ('ghi')''')
+
+    sql = (
+        'select count(*) from test;\n'
+        'select * from test limit 1;'
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, args=CLI_ARGS + ['-t'], input=sql)
+
+    expected = (
+        '+---------+\n| count   |\n|---------|\n| 3       |\n+---------+'
+    )
+
+    assert result.exit_code == 0
+    assert expected in result.output
 
 
 @dbtest
